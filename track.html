@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track Growth | GreenRoots</title>
+    <meta name="description" content="Track the growth of registered trees — see planting details, location, and growth updates.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<header>
+    <nav>
+        <h1><a href="index.html">🌳 GreenRoots</a></h1>
+        <ul class="nav-links">
+            <li><a href="index.html">Home</a></li>
+            <li><a href="about.html">About</a></li>
+            <li><a href="register.html">Register</a></li>
+            <li><a href="track.html">Track Growth</a></li>
+            <li><a href="community.html">Community</a></li>
+            <li><a href="contact.html">Contact</a></li>
+        </ul>
+        <button class="nav-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+    </nav>
+    <p class="tagline">🌿 Restoring Nature, One Tree at a Time</p>
+</header>
+
+<main class="track-page">
+    <div class="page-header">
+        <p class="mission-tag">TRACK GROWTH</p>
+        <h2>🌳 Watch Your Trees Flourish</h2>
+        <p>Monitor the progress of every registered tree — from seedling to shade-giving giant.</p>
+    </div>
+
+    <div class="track-controls">
+        <input type="text" id="track-search" placeholder="🔍 Search by tree type, planter, or location..." aria-label="Search trees">
+        <select id="track-filter" aria-label="Filter by growth stage">
+            <option value="">All Stages</option>
+            <option value="seedling">🌱 Seedling</option>
+            <option value="sapling">🌿 Sapling</option>
+            <option value="young">🌳 Young</option>
+            <option value="mature">🌲 Mature</option>
+        </select>
+    </div>
+
+    <div class="track-layout">
+        <div class="tree-list" id="tree-list">
+            <div class="track-loading">Loading trees...</div>
+        </div>
+        <div class="tree-detail" id="tree-detail">
+            <div class="track-placeholder">
+                <div class="track-placeholder-icon">🌳</div>
+                <p>Select a tree from the list to see its details and growth history.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="track-map-container" style="display:none;">
+        <div id="track-map" role="application" aria-label="Map showing tree locations"></div>
+    </div>
+</main>
+
+<footer class="site-footer">
+    <div class="footer-content">
+        <div class="footer-section">
+            <h3>🌳 GreenRoots</h3>
+            <p>Restoring Nature, One Tree at a Time</p>
+            <p class="footer-desc">A platform for planting, registering, and tracking trees across India.</p>
+        </div>
+        <div class="footer-section">
+            <h4>Quick Links</h4>
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="about.html">About</a></li>
+                <li><a href="register.html">Register Your Tree</a></li>
+                <li><a href="track.html">Track Growth</a></li>
+            </ul>
+        </div>
+        <div class="footer-section">
+            <h4>Get Involved</h4>
+            <ul>
+                <li><a href="community.html">Community</a></li>
+                <li><a href="contact.html">Contact Us</a></li>
+                <li><a href="about.html">Our Mission</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <p>© 2024 GreenRoots. Growing a greener future together.</p>
+    </div>
+</footer>
+
+<script src="supabase-client.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
