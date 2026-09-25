@@ -83,18 +83,17 @@ async function fetchStats() {
     ]);
     const { data: contributors } = await supabase
       .from("trees")
-      .select("planter_name")
-      .order("planter_name");
+      .select("planter_name");
     const { data: locations } = await supabase
       .from("trees")
       .select("location_name")
       .neq("location_name", "");
 
     const uniqueContributors = new Set(
-      (contributors || []).map((r) => r.planter_name)
+      (contributors || []).map(function (r) { return r.planter_name; })
     ).size;
     const uniqueLocations = new Set(
-      (locations || []).map((r) => r.location_name)
+      (locations || []).map(function (r) { return r.location_name; })
     ).size;
 
     return {
@@ -114,12 +113,6 @@ async function initCounters() {
   if (counters.length === 0) return;
 
   const stats = await fetchStats();
-
-  counters.forEach(function (el) {
-    const target = parseInt(el.dataset.target, 10) || 0;
-    const suffix = el.dataset.suffix || "";
-    el.dataset.suffix = suffix;
-  });
 
   const counterMap = {
     "Trees Planted": "trees",
@@ -197,22 +190,34 @@ function initRegisterForm() {
   const formMessage = document.getElementById("form-message");
   const submitBtn = document.getElementById("submit-btn");
 
+  var isSubmitting = false;
+
   form.addEventListener("submit", async function (e) {
     e.preventDefault();
+    if (isSubmitting) return;
+
     clearErrors();
     formMessage.className = "form-message";
     formMessage.textContent = "";
 
-    let valid = true;
+    var valid = true;
 
     if (!nameInput.value.trim()) {
       showError("error-planter-name", "Please enter your name.");
+      nameInput.classList.add("invalid");
+      valid = false;
+    } else if (nameInput.value.trim().length > 100) {
+      showError("error-planter-name", "Name must be 100 characters or fewer.");
       nameInput.classList.add("invalid");
       valid = false;
     }
 
     if (!typeInput.value.trim()) {
       showError("error-tree-type", "Please enter the tree type.");
+      typeInput.classList.add("invalid");
+      valid = false;
+    } else if (typeInput.value.trim().length > 80) {
+      showError("error-tree-type", "Tree type must be 80 characters or fewer.");
       typeInput.classList.add("invalid");
       valid = false;
     }
@@ -222,8 +227,8 @@ function initRegisterForm() {
       dateInput.classList.add("invalid");
       valid = false;
     } else {
-      const selectedDate = new Date(dateInput.value);
-      const today = new Date();
+      var selectedDate = new Date(dateInput.value);
+      var today = new Date();
       today.setHours(23, 59, 59, 999);
       if (selectedDate > today) {
         showError("error-planting-date", "Planting date cannot be in the future.");
@@ -232,53 +237,85 @@ function initRegisterForm() {
       }
     }
 
-    if (!locationMethod.value || !locationLat.value || !locationLng.value) {
+    var lat = parseFloat(locationLat.value);
+    var lng = parseFloat(locationLng.value);
+    if (!locationMethod.value || isNaN(lat) || isNaN(lng)) {
       showError("error-location", "Please select a planting location on the map.");
       valid = false;
+    } else if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      showError("error-location", "Invalid location coordinates. Please reselect your location.");
+      valid = false;
+    }
+
+    if (photoInput.files && photoInput.files[0]) {
+      var file = photoInput.files[0];
+      var validTypes = ["image/jpeg", "image/png", "image/webp"];
+      if (validTypes.indexOf(file.type) === -1) {
+        showError("error-tree-photo", "Please upload a JPG, PNG, or WebP image.");
+        valid = false;
+      } else if (file.size > 5 * 1024 * 1024) {
+        showError("error-tree-photo", "Image must be 5MB or smaller.");
+        valid = false;
+      }
     }
 
     if (!valid) return;
 
+    isSubmitting = true;
     submitBtn.disabled = true;
     submitBtn.textContent = "Registering...";
     formMessage.className = "form-message loading";
     formMessage.textContent = "Saving your tree...";
 
     try {
-      const supabase = await getSupabaseClient();
+      var supabase = await getSupabaseClient();
 
-      const insertData = {
+      var insertData = {
         planter_name: nameInput.value.trim(),
         tree_type: typeInput.value.trim(),
         planting_date: dateInput.value,
-        latitude: parseFloat(locationLat.value),
-        longitude: parseFloat(locationLng.value),
+        latitude: lat,
+        longitude: lng,
         location_name: locationNameHidden.value || "",
         photo_url: null,
       };
 
-      const { error } = await supabase.from("trees").insert(insertData);
+      var result = await supabase.from("trees").insert(insertData).select("id").single();
 
-      if (error) throw error;
+      if (result.error) throw result.error;
 
-      formMessage.className = "form-message success";
-      formMessage.textContent =
-        "🌳 Your tree has been registered successfully! You can now track its growth on the Track Growth page.";
+      var treeId = result.data.id;
+      var shortRef = treeId.substring(0, 8).toUpperCase();
+
+      formMessage.className = "form-message";
+      formMessage.textContent = "";
+
+      var confirmation = document.createElement("div");
+      confirmation.className = "success-confirmation";
+      confirmation.innerHTML =
+        '<div class="success-icon">🌳</div>' +
+        '<h3>Your tree has been registered!</h3>' +
+        '<p>Give it a name, watch it grow, and share its journey with the community.</p>' +
+        '<div class="tree-ref">Tree ID: ' + shortRef + '</div>' +
+        '<div class="success-actions">' +
+        '<button type="button" onclick="window.location.href=\'track.html\'">🌿 Track Growth</button>' +
+        '<button type="button" class="btn-secondary" onclick="resetRegisterForm()">🌱 Register Another</button>' +
+        '</div>';
+
+      form.appendChild(confirmation);
+      confirmation.scrollIntoView({ behavior: "smooth", block: "center" });
+
       form.reset();
       if (locationMethod) locationMethod.value = "";
       if (locationLat) locationLat.value = "";
       if (locationLng) locationLng.value = "";
       if (locationNameHidden) locationNameHidden.value = "";
-      const locationStatus = document.querySelector(".location-status");
+      var locationStatus = document.querySelector(".location-status");
       if (locationStatus) locationStatus.textContent = "Location not selected yet";
 
       submitBtn.textContent = "🌳 Register My Tree";
       submitBtn.disabled = false;
-
-      setTimeout(function () {
-        formMessage.className = "form-message";
-        formMessage.textContent = "";
-      }, 6000);
+      isSubmitting = false;
     } catch (err) {
       console.error("Registration error:", err);
       formMessage.className = "form-message error";
@@ -286,11 +323,12 @@ function initRegisterForm() {
         "Unable to register your tree right now. Please try again in a moment.";
       submitBtn.textContent = "🌳 Register My Tree";
       submitBtn.disabled = false;
+      isSubmitting = false;
     }
   });
 
   function showError(id, msg) {
-    const el = document.getElementById(id);
+    var el = document.getElementById(id);
     if (el) el.textContent = msg;
   }
 
@@ -314,6 +352,13 @@ function initRegisterForm() {
   });
 }
 
+function resetRegisterForm() {
+  var confirmation = document.querySelector(".success-confirmation");
+  if (confirmation) confirmation.remove();
+  var form = document.getElementById("tree-form");
+  if (form) form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 /* ==============================
    CONTACT FORM
 ============================== */
@@ -328,13 +373,17 @@ function initContactForm() {
   const formMessage = document.getElementById("contact-form-message");
   const submitBtn = document.getElementById("contact-submit-btn");
 
+  var isSubmitting = false;
+
   form.addEventListener("submit", async function (e) {
     e.preventDefault();
+    if (isSubmitting) return;
+
     clearContactErrors();
     formMessage.className = "form-message";
     formMessage.textContent = "";
 
-    let valid = true;
+    var valid = true;
 
     if (!nameInput.value.trim()) {
       showContactError("error-contact-name", "Please enter your name.");
@@ -342,7 +391,7 @@ function initContactForm() {
       valid = false;
     }
 
-    const email = emailInput.value.trim();
+    var email = emailInput.value.trim();
     if (!email) {
       showContactError("error-contact-email", "Please enter your email.");
       emailInput.classList.add("invalid");
@@ -357,18 +406,23 @@ function initContactForm() {
       showContactError("error-contact-message", "Please enter a message.");
       messageInput.classList.add("invalid");
       valid = false;
+    } else if (messageInput.value.trim().length > 2000) {
+      showContactError("error-contact-message", "Message must be 2000 characters or fewer.");
+      messageInput.classList.add("invalid");
+      valid = false;
     }
 
     if (!valid) return;
 
+    isSubmitting = true;
     submitBtn.disabled = true;
     submitBtn.textContent = "Sending...";
     formMessage.className = "form-message loading";
     formMessage.textContent = "Sending your message...";
 
     try {
-      const supabase = await getSupabaseClient();
-      const { error } = await supabase.from("contact_messages").insert({
+      var supabase = await getSupabaseClient();
+      var { error } = await supabase.from("contact_messages").insert({
         name: nameInput.value.trim(),
         email: email,
         message: messageInput.value.trim(),
@@ -382,6 +436,7 @@ function initContactForm() {
       form.reset();
       submitBtn.textContent = "📨 Send Message";
       submitBtn.disabled = false;
+      isSubmitting = false;
 
       setTimeout(function () {
         formMessage.className = "form-message";
@@ -394,11 +449,12 @@ function initContactForm() {
         "Unable to send your message right now. Please try again later.";
       submitBtn.textContent = "📨 Send Message";
       submitBtn.disabled = false;
+      isSubmitting = false;
     }
   });
 
   function showContactError(id, msg) {
-    const el = document.getElementById(id);
+    var el = document.getElementById(id);
     if (el) el.textContent = msg;
   }
 
@@ -417,16 +473,27 @@ function initContactForm() {
 ============================== */
 
 async function initTrackPage() {
-  const treeList = document.getElementById("tree-list");
+  var treeList = document.getElementById("tree-list");
   if (!treeList) return;
 
-  let allTrees = [];
-  let trackMap = null;
-  let trackMarkers = [];
+  var allTrees = [];
+  var trackMap = null;
+
+  // Show skeleton loading
+  treeList.innerHTML = "";
+  for (var i = 0; i < 3; i++) {
+    var skel = document.createElement("div");
+    skel.className = "skeleton-card";
+    skel.innerHTML =
+      '<div class="skeleton-line medium"></div>' +
+      '<div class="skeleton-line long"></div>' +
+      '<div class="skeleton-line short"></div>';
+    treeList.appendChild(skel);
+  }
 
   try {
-    const supabase = await getSupabaseClient();
-    const { data, error } = await supabase
+    var supabase = await getSupabaseClient();
+    var { data, error } = await supabase
       .from("trees")
       .select("*")
       .order("created_at", { ascending: false });
@@ -436,20 +503,30 @@ async function initTrackPage() {
   } catch (err) {
     console.error("Failed to load trees:", err);
     treeList.innerHTML =
-      '<div class="track-loading">Unable to load trees. Please try again later.</div>';
+      '<div class="error-state">' +
+      '<div class="error-state-icon">⚠️</div>' +
+      '<h4>Unable to load trees</h4>' +
+      '<p>Something went wrong while fetching tree data.</p>' +
+      '<button type="button" onclick="location.reload()">Try Again</button>' +
+      '</div>';
     return;
   }
 
   if (allTrees.length === 0) {
     treeList.innerHTML =
-      '<div class="track-loading">No trees registered yet. <a href="register.html">Register the first one!</a></div>';
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon">🌱</div>' +
+      '<h4>No trees registered yet</h4>' +
+      '<p>Be the first to register a tree and start tracking its growth.</p>' +
+      '<a href="register.html">Register a tree →</a>' +
+      '</div>';
     return;
   }
 
   renderTreeList(allTrees);
 
-  const searchInput = document.getElementById("track-search");
-  const filterSelect = document.getElementById("track-filter");
+  var searchInput = document.getElementById("track-search");
+  var filterSelect = document.getElementById("track-filter");
 
   if (searchInput) {
     searchInput.addEventListener("input", function () {
@@ -463,16 +540,16 @@ async function initTrackPage() {
   }
 
   function applyFilters() {
-    const query = (searchInput?.value || "").toLowerCase().trim();
-    const stage = filterSelect?.value || "";
+    var query = (searchInput ? searchInput.value : "").toLowerCase().trim();
+    var stage = filterSelect ? filterSelect.value : "";
 
-    let filtered = allTrees.filter(function (t) {
-      const matchesQuery =
+    var filtered = allTrees.filter(function (t) {
+      var matchesQuery =
         !query ||
         t.tree_type.toLowerCase().includes(query) ||
         t.planter_name.toLowerCase().includes(query) ||
         (t.location_name || "").toLowerCase().includes(query);
-      const matchesStage = !stage || t.growth_stage === stage;
+      var matchesStage = !stage || t.growth_stage === stage;
       return matchesQuery && matchesStage;
     });
 
@@ -483,17 +560,21 @@ async function initTrackPage() {
     treeList.innerHTML = "";
     if (trees.length === 0) {
       treeList.innerHTML =
-        '<div class="track-loading">No trees match your search.</div>';
+        '<div class="empty-state">' +
+        '<div class="empty-state-icon">🔍</div>' +
+        '<h4>No trees match your search</h4>' +
+        '<p>Try adjusting your search or filter criteria.</p>' +
+        '</div>';
       return;
     }
     trees.forEach(function (tree) {
-      const card = document.createElement("div");
+      var card = document.createElement("div");
       card.className = "tree-card";
       card.setAttribute("role", "button");
       card.setAttribute("tabindex", "0");
       card.dataset.treeId = tree.id;
 
-      const stageIcon = {
+      var stageIcon = {
         seedling: "🌱",
         sapling: "🌿",
         young: "🌳",
@@ -533,16 +614,16 @@ async function initTrackPage() {
   }
 
   async function showTreeDetail(tree) {
-    const detailEl = document.getElementById("tree-detail");
+    var detailEl = document.getElementById("tree-detail");
     if (!detailEl) return;
 
     detailEl.innerHTML =
       '<div class="track-loading">Loading details...</div>';
 
-    let updates = [];
+    var updates = [];
     try {
-      const supabase = await getSupabaseClient();
-      const { data, error } = await supabase
+      var supabase = await getSupabaseClient();
+      var { data, error } = await supabase
         .from("tree_updates")
         .select("*")
         .eq("tree_id", tree.id)
@@ -552,32 +633,57 @@ async function initTrackPage() {
       console.error("Failed to load updates:", err);
     }
 
-    const daysPlanted = Math.floor(
+    var daysPlanted = Math.floor(
       (Date.now() - new Date(tree.planting_date).getTime()) / (1000 * 60 * 60 * 24)
     );
-    const stageIcon = {
+    var stageIcon = {
       seedling: "🌱",
       sapling: "🌿",
       young: "🌳",
       mature: "🌲",
     }[tree.growth_stage] || "🌱";
 
-    let updatesHtml = "";
-    if (updates.length === 0) {
-      updatesHtml = "<p style='color:var(--text-light);font-size:15px;'>No growth updates recorded yet.</p>";
+    // Build growth timeline (planting + updates in chronological order)
+    var timelineEntries = [];
+
+    timelineEntries.push({
+      type: "planting",
+      date: tree.planting_date,
+      label: "Tree Planted",
+      stats: "Planted by " + escapeHtml(tree.planter_name),
+      notes: null,
+    });
+
+    // Updates are fetched newest-first; add them in reverse for chronological display
+    var chronoUpdates = updates.slice().reverse();
+    chronoUpdates.forEach(function (u) {
+      var stats = [];
+      if (u.height_cm) stats.push(u.height_cm + " cm");
+      stats.push("Health: " + escapeHtml(u.health_status));
+      timelineEntries.push({
+        type: "update",
+        date: u.update_date,
+        label: "Growth Update",
+        stats: stats.join(" · "),
+        notes: u.notes,
+      });
+    });
+
+    var timelineHtml = "";
+    if (timelineEntries.length === 0) {
+      timelineHtml = '<p style="color:var(--text-light);font-size:15px;">No growth history yet.</p>';
     } else {
-      updatesHtml = updates.map(function (u) {
-        return (
-          '<div class="update-entry">' +
-          '<div class="update-date">' + formatDate(u.update_date) + "</div>" +
-          '<div class="update-stats">' +
-          (u.height_cm ? "<span>" + u.height_cm + " cm</span>" : "") +
-          "<span>Health: " + escapeHtml(u.health_status) + "</span>" +
-          "</div>" +
-          (u.notes ? "<p>" + escapeHtml(u.notes) + "</p>" : "") +
-          "</div>"
-        );
-      }).join("");
+      timelineHtml = '<div class="growth-timeline">';
+      timelineEntries.forEach(function (entry) {
+        timelineHtml +=
+          '<div class="timeline-entry ' + entry.type + '">' +
+          '<div class="timeline-date">' + formatDate(entry.date) + '</div>' +
+          '<div class="timeline-label">' + escapeHtml(entry.label) + '</div>' +
+          '<div class="timeline-stats">' + entry.stats + '</div>' +
+          (entry.notes ? '<p>' + escapeHtml(entry.notes) + '</p>' : '') +
+          '</div>';
+      });
+      timelineHtml += '</div>';
     }
 
     detailEl.innerHTML =
@@ -594,8 +700,8 @@ async function initTrackPage() {
       '<div class="detail-item"><label>Coordinates</label><span class="value">' + tree.latitude.toFixed(4) + ", " + tree.longitude.toFixed(4) + "</span></div>" +
       "</div>" +
       '<div class="detail-updates">' +
-      "<h4>🌿 Growth History</h4>" +
-      updatesHtml +
+      "<h4>🌿 Growth Timeline</h4>" +
+      timelineHtml +
       "</div>" +
       '<div id="track-map"></div>';
 
@@ -608,13 +714,12 @@ async function initTrackPage() {
     if (trackMap) {
       trackMap.remove();
       trackMap = null;
-      trackMarkers = [];
     }
-    const mapEl = document.getElementById("track-map");
+    var mapEl = document.getElementById("track-map");
     if (!mapEl) return;
 
     trackMap = L.map("track-map").setView([tree.latitude, tree.longitude], 14);
-    const tileUrl =
+    var tileUrl =
       "https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=6b4b353b3eb74bd191c7ae4751a7a86a";
     L.tileLayer(tileUrl, {
       maxZoom: 20,
@@ -622,7 +727,7 @@ async function initTrackPage() {
         'Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
     }).addTo(trackMap);
 
-    const marker = L.marker([tree.latitude, tree.longitude])
+    L.marker([tree.latitude, tree.longitude])
       .addTo(trackMap)
       .bindPopup(
         "<strong>" + escapeHtml(tree.tree_type) + "</strong><br>" +
@@ -630,7 +735,6 @@ async function initTrackPage() {
         escapeHtml(tree.location_name || "")
       )
       .openPopup();
-    trackMarkers.push(marker);
 
     setTimeout(function () {
       trackMap.invalidateSize();
@@ -643,16 +747,17 @@ async function initTrackPage() {
 ============================== */
 
 async function initCommunityPage() {
-  const activityFeed = document.getElementById("activity-feed");
-  const speciesChart = document.getElementById("species-chart");
-  const contributorsGrid = document.getElementById("contributors-grid");
+  var activityFeed = document.getElementById("activity-feed");
+  var speciesChart = document.getElementById("species-chart");
+  var contributorsGrid = document.getElementById("contributors-grid");
+  var stageBreakdown = document.getElementById("stage-breakdown");
 
   if (!activityFeed && !speciesChart && !contributorsGrid) return;
 
-  let trees = [];
+  var trees = [];
   try {
-    const supabase = await getSupabaseClient();
-    const { data, error } = await supabase
+    var supabase = await getSupabaseClient();
+    var { data, error } = await supabase
       .from("trees")
       .select("*")
       .order("created_at", { ascending: false });
@@ -662,7 +767,11 @@ async function initCommunityPage() {
     console.error("Failed to load community data:", err);
     if (activityFeed)
       activityFeed.innerHTML =
-        '<div class="track-loading">Unable to load activity.</div>';
+        '<div class="error-state">' +
+        '<div class="error-state-icon">⚠️</div>' +
+        '<h4>Unable to load activity</h4>' +
+        '<p>Please try again later.</p>' +
+        '</div>';
     if (speciesChart)
       speciesChart.innerHTML =
         '<div class="track-loading">Unable to load species data.</div>';
@@ -675,36 +784,73 @@ async function initCommunityPage() {
   if (activityFeed) renderActivityFeed(trees);
   if (speciesChart) renderSpeciesChart(trees);
   if (contributorsGrid) renderContributors(trees);
+  if (stageBreakdown) renderStageBreakdown(trees);
+}
+
+function renderStageBreakdown(trees) {
+  var el = document.getElementById("stage-breakdown");
+  if (!el) return;
+
+  if (trees.length === 0) {
+    el.style.display = "none";
+    return;
+  }
+
+  var stages = {
+    seedling: { icon: "🌱", label: "Seedlings" },
+    sapling: { icon: "🌿", label: "Saplings" },
+    young: { icon: "🌳", label: "Young Trees" },
+    mature: { icon: "🌲", label: "Mature Trees" },
+  };
+
+  var counts = { seedling: 0, sapling: 0, young: 0, mature: 0 };
+  trees.forEach(function (t) {
+    if (counts[t.growth_stage] !== undefined) counts[t.growth_stage]++;
+  });
+
+  var hasAny = false;
+  for (var k in counts) { if (counts[k] > 0) hasAny = true; }
+  if (!hasAny) { el.style.display = "none"; return; }
+
+  el.style.display = "flex";
+  el.innerHTML = "";
+  ["seedling", "sapling", "young", "mature"].forEach(function (stage) {
+    if (counts[stage] === 0) return;
+    var card = document.createElement("div");
+    card.className = "stage-card";
+    card.innerHTML =
+      '<div class="stage-card-icon">' + stages[stage].icon + '</div>' +
+      '<strong>' + counts[stage] + '</strong>' +
+      '<span>' + stages[stage].label + '</span>';
+    el.appendChild(card);
+  });
 }
 
 function renderActivityFeed(trees) {
-  const feed = document.getElementById("activity-feed");
+  var feed = document.getElementById("activity-feed");
   if (!feed) return;
 
   if (trees.length === 0) {
     feed.innerHTML =
-      '<div class="track-loading">No activity yet.</div>';
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon">🌱</div>' +
+      '<h4>No activity yet</h4>' +
+      '<p>Once trees are registered, their activity will appear here.</p>' +
+      '<a href="register.html">Register the first tree →</a>' +
+      '</div>';
     return;
   }
 
-  const recent = trees.slice(0, 8);
+  var recent = trees.slice(0, 8);
   feed.innerHTML = recent
     .map(function (t) {
-      const initials = t.planter_name
-        .split(" ")
-        .map(function (w) {
-          return w[0];
-        })
-        .join("")
-        .substring(0, 2)
-        .toUpperCase();
-      const stageIcon = {
+      var stageIcon = {
         seedling: "🌱",
         sapling: "🌿",
         young: "🌳",
         mature: "🌲",
       }[t.growth_stage] || "🌱";
-      const timeAgo = formatTimeAgo(t.created_at);
+      var timeAgo = formatTimeAgo(t.created_at);
 
       return (
         '<div class="activity-item">' +
@@ -722,28 +868,33 @@ function renderActivityFeed(trees) {
 }
 
 function renderSpeciesChart(trees) {
-  const chart = document.getElementById("species-chart");
+  var chart = document.getElementById("species-chart");
   if (!chart) return;
 
   if (trees.length === 0) {
-    chart.innerHTML = '<div class="track-loading">No species data yet.</div>';
+    chart.innerHTML =
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon">🌳</div>' +
+      '<h4>No species data yet</h4>' +
+      '<p>Species distribution will appear once trees are registered.</p>' +
+      '</div>';
     return;
   }
 
-  const counts = {};
+  var counts = {};
   trees.forEach(function (t) {
-    const type = t.tree_type || "Unknown";
+    var type = t.tree_type || "Unknown";
     counts[type] = (counts[type] || 0) + 1;
   });
 
-  const sorted = Object.entries(counts).sort(function (a, b) {
+  var sorted = Object.entries(counts).sort(function (a, b) {
     return b[1] - a[1];
   });
-  const maxCount = sorted[0][1];
+  var maxCount = sorted[0][1];
 
   chart.innerHTML = sorted
     .map(function (entry) {
-      const pct = (entry[1] / maxCount) * 100;
+      var pct = (entry[1] / maxCount) * 100;
       return (
         '<div class="species-bar-row">' +
         '<div class="species-label">' + escapeHtml(entry[0]) + "</div>" +
@@ -758,37 +909,34 @@ function renderSpeciesChart(trees) {
 }
 
 function renderContributors(trees) {
-  const grid = document.getElementById("contributors-grid");
+  var grid = document.getElementById("contributors-grid");
   if (!grid) return;
 
   if (trees.length === 0) {
-    grid.innerHTML = '<div class="track-loading">No contributors yet.</div>';
+    grid.innerHTML =
+      '<div class="empty-state">' +
+      '<div class="empty-state-icon">🤝</div>' +
+      '<h4>No contributors yet</h4>' +
+      '<p>Top contributors will appear here once trees are registered.</p>' +
+      '</div>';
     return;
   }
 
-  const counts = {};
+  var counts = {};
   trees.forEach(function (t) {
     counts[t.planter_name] = (counts[t.planter_name] || 0) + 1;
   });
 
-  const sorted = Object.entries(counts)
+  var sorted = Object.entries(counts)
     .sort(function (a, b) {
       return b[1] - a[1];
     })
     .slice(0, 6);
 
-  const icons = ["🌱", "🌳", "🌿", "🌲", "🪴", "🍃"];
+  var icons = ["🌱", "🌳", "🌿", "🌲", "🪴", "🍃"];
 
   grid.innerHTML = sorted
     .map(function (entry, i) {
-      const initials = entry[0]
-        .split(" ")
-        .map(function (w) {
-          return w[0];
-        })
-        .join("")
-        .substring(0, 2)
-        .toUpperCase();
       return (
         '<div class="contributor-card">' +
         '<div class="contributor-avatar">' + (icons[i] || "🌿") + "</div>" +
@@ -816,7 +964,7 @@ function escapeHtml(str) {
 
 function formatDate(dateStr) {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
+  var d = new Date(dateStr);
   return d.toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
@@ -826,8 +974,8 @@ function formatDate(dateStr) {
 
 function formatTimeAgo(timestamp) {
   if (!timestamp) return "";
-  const diff = Date.now() - new Date(timestamp).getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  var diff = Date.now() - new Date(timestamp).getTime();
+  var days = Math.floor(diff / (1000 * 60 * 60 * 24));
   if (days === 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return days + " days ago";

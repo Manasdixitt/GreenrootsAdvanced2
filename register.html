@@ -42,25 +42,25 @@
 
     <form class="tree-form" id="tree-form" novalidate>
         <div class="form-group">
-            <label for="planter-name">Your Name</label>
+            <label for="planter-name">Your Name <span class="required">*</span></label>
             <input type="text" id="planter-name" placeholder="Enter your name" required>
             <span class="field-error" id="error-planter-name"></span>
         </div>
 
         <div class="form-group">
-            <label for="tree-type">Tree Type</label>
+            <label for="tree-type">Tree Type <span class="required">*</span></label>
             <input type="text" id="tree-type" placeholder="e.g. Neem, Mango, Peepal" required>
             <span class="field-error" id="error-tree-type"></span>
         </div>
 
         <div class="form-group">
-            <label for="planting-date">Planting Date</label>
+            <label for="planting-date">Planting Date <span class="required">*</span></label>
             <input type="date" id="planting-date" required>
             <span class="field-error" id="error-planting-date"></span>
         </div>
 
         <div class="form-group">
-            <label>Planting Location</label>
+            <label>Planting Location <span class="required">*</span></label>
             <button type="button" class="location-button">
                 📍 Use My Location
             </button>
@@ -78,8 +78,8 @@
 
         <div class="form-group">
             <label for="tree-photo">Tree Photo</label>
-            <input type="file" id="tree-photo" accept="image/*">
-            <p class="photo-hint">Optional — share a photo of your tree (JPG, PNG)</p>
+            <input type="file" id="tree-photo" accept="image/jpeg,image/png,image/webp">
+            <p class="photo-hint">Optional — share a photo of your tree (JPG, PNG, or WebP, max 5MB)</p>
         </div>
 
         <div class="form-message" id="form-message"></div>
