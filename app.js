@@ -239,6 +239,90 @@ function generateTreeUID() {
 }
 
 /* ==============================
+   PHOTO UPLOAD (Supabase Storage)
+============================== */
+
+var TREE_PHOTO_BUCKET = "tree-photos";
+
+async function uploadTreePhoto(file, prefix) {
+  var supabase = await getSupabaseClient();
+  var ext = file.name.split(".").pop().toLowerCase();
+  var fileName = prefix + "-" + Date.now() + "-" + Math.random().toString(36).substring(2, 8) + "." + ext;
+  var filePath = prefix + "/" + fileName;
+
+  var { error } = await supabase.storage
+    .from(TREE_PHOTO_BUCKET)
+    .upload(filePath, file, { contentType: file.type, upsert: false });
+
+  if (error) throw error;
+
+  var { data: urlData } = supabase.storage
+    .from(TREE_PHOTO_BUCKET)
+    .getPublicUrl(filePath);
+
+  return urlData.publicUrl;
+}
+
+/* ==============================
+   UPDATE INTERVAL CONFIG
+============================== */
+
+var UPDATE_INTERVALS = {
+  INITIAL_UPDATE_DAYS: 30,
+  SUBSEQUENT_UPDATE_DAYS: 90,
+  OVERDUE_DAYS: 180,
+};
+
+function getUpdateStatus(tree, updates) {
+  var lastUpdateDate = null;
+  var lastUpdate = updates.length > 0 ? updates[0] : null;
+  if (lastUpdate) {
+    lastUpdateDate = lastUpdate.update_date;
+  }
+
+  var referenceDate = lastUpdateDate || tree.planting_date;
+  var interval = lastUpdate ? UPDATE_INTERVALS.SUBSEQUENT_UPDATE_DAYS : UPDATE_INTERVALS.INITIAL_UPDATE_DAYS;
+
+  var daysSinceReference = daysBetween(referenceDate, new Date());
+  if (daysSinceReference === null || daysSinceReference < 0) daysSinceReference = 0;
+
+  var refDate = parseDateLocal(referenceDate);
+  var nextDueDate = new Date(refDate.getTime() + interval * 24 * 60 * 60 * 1000);
+  var nextDueStr = nextDueDate.getFullYear() + "-" +
+    String(nextDueDate.getMonth() + 1).padStart(2, "0") + "-" +
+    String(nextDueDate.getDate()).padStart(2, "0");
+
+  var isOverdue = daysSinceReference >= UPDATE_INTERVALS.OVERDUE_DAYS;
+  var isDue = daysSinceReference >= interval;
+
+  if (isDue) {
+    return {
+      status: "due",
+      daysSinceReference: daysSinceReference,
+      nextDueDate: nextDueStr,
+      isOverdue: isOverdue,
+      lastUpdateDate: lastUpdateDate,
+    };
+  }
+
+  if (lastUpdate) {
+    return {
+      status: "recently_updated",
+      daysSinceReference: daysSinceReference,
+      nextDueDate: nextDueStr,
+      lastUpdateDate: lastUpdateDate,
+    };
+  }
+
+  return {
+    status: "not_due",
+    daysSinceReference: daysSinceReference,
+    nextDueDate: nextDueStr,
+    lastUpdateDate: null,
+  };
+}
+
+/* ==============================
    REGISTER FORM
 ============================== */
 
@@ -351,13 +435,19 @@ function initRegisterForm() {
     submitBtn.disabled = true;
     submitBtn.textContent = "Registering...";
     formMessage.className = "form-message loading";
-    formMessage.textContent = "Saving your tree...";
+    formMessage.textContent = "Uploading photo & saving your tree...";
 
     try {
       var supabase = await getSupabaseClient();
 
       var treeUID = generateTreeUID();
+      var photoFile = photoInput.files[0];
 
+      formMessage.textContent = "Uploading your tree photo...";
+      var photoUrl = await uploadTreePhoto(photoFile, "registration");
+      if (!photoUrl) throw new Error("Photo upload failed — no URL returned.");
+
+      formMessage.textContent = "Saving your tree...";
       var insertData = {
         planter_name: nameInput.value.trim(),
         planter_email: email,
@@ -366,7 +456,7 @@ function initRegisterForm() {
         latitude: lat,
         longitude: lng,
         location_name: locationNameHidden.value || "",
-        photo_url: null,
+        photo_url: photoUrl,
         tree_uid: treeUID,
       };
 
@@ -689,6 +779,7 @@ function showTreeDetail(tree, updates, trackMap) {
       label: "Growth Update",
       stats: stats.join(" · "),
       notes: u.notes,
+      photoUrl: u.photo_url || null,
     });
   });
 
@@ -700,6 +791,7 @@ function showTreeDetail(tree, updates, trackMap) {
       '<div class="timeline-label">' + escapeHtml(entry.label) + '</div>' +
       '<div class="timeline-stats">' + entry.stats + '</div>' +
       (entry.notes ? '<p>' + escapeHtml(entry.notes) + '</p>' : '') +
+      (entry.photoUrl ? '<img class="timeline-photo" src="' + escapeHtml(entry.photoUrl) + '" alt="Tree photo" />' : '') +
       '</div>';
   });
   timelineHtml += '</div>';
@@ -711,12 +803,22 @@ function showTreeDetail(tree, updates, trackMap) {
     daysLabel = daysPlanted + " day" + (daysPlanted !== 1 ? "s" : "") + " since planting";
   }
 
+  var photoHtml = "";
+  if (tree.photo_url) {
+    photoHtml =
+      '<div class="tree-photo-display">' +
+      '<div class="tree-photo-label">Registration Photo</div>' +
+      '<img src="' + escapeHtml(tree.photo_url) + '" alt="Registration photo" />' +
+      '</div>';
+  }
+
   detailEl.innerHTML =
     '<div class="detail-header">' +
     "<h3>" + stageIcon + " " + escapeHtml(tree.tree_type) + "</h3>" +
     "<p>Planted by " + escapeHtml(tree.planter_name) + "</p>" +
     '<div class="tree-uid-display">Tree UID: <strong>' + escapeHtml(tree.tree_uid) + '</strong></div>' +
     "</div>" +
+    photoHtml +
     '<div class="detail-grid">' +
     '<div class="detail-item"><label>Planting Date</label><span class="value">' + formatDate(tree.planting_date) + "</span></div>" +
     '<div class="detail-item"><label>Time Since Planting</label><span class="value">' + daysLabel + "</span></div>" +
@@ -735,9 +837,9 @@ function showTreeDetail(tree, updates, trackMap) {
     initTrackMap(tree, trackMap);
   }
 
-  // Show update form
+  // Show update form (with time-based status)
   if (updateSection) {
-    renderUpdateForm(updateSection, tree);
+    renderUpdateForm(updateSection, tree, updates);
   }
 
   detailEl.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -778,54 +880,90 @@ function initTrackMap(tree, trackMap) {
    TREE UPDATE FORM
 ============================== */
 
-function renderUpdateForm(container, tree) {
-  container.innerHTML =
-    '<div class="update-form-container">' +
-    '<h3>📝 Update Your Tree</h3>' +
-    '<p class="update-form-intro">Help GreenRoots track your tree\'s growth. Submit a new update below.</p>' +
-    '<form class="tree-update-form" id="tree-update-form" novalidate>' +
-    '<div class="form-group">' +
-    '<label for="update-growth-stage">Current Growth Stage <span class="required">*</span></label>' +
-    '<select id="update-growth-stage" required>' +
-    '<option value="">Select growth stage</option>' +
-    '<option value="seedling">🌱 Seedling</option>' +
-    '<option value="sapling">🌿 Sapling</option>' +
-    '<option value="young">🌳 Young</option>' +
-    '<option value="mature">🌲 Mature</option>' +
-    '</select>' +
-    '<span class="field-error" id="error-update-stage"></span>' +
-    '</div>' +
-    '<div class="form-group">' +
-    '<label for="update-height">Current Height (cm)</label>' +
-    '<input type="number" id="update-height" placeholder="e.g. 120" min="0" max="100000">' +
-    '<span class="field-error" id="error-update-height"></span>' +
-    '</div>' +
-    '<div class="form-group">' +
-    '<label for="update-health">Health Status <span class="required">*</span></label>' +
-    '<select id="update-health" required>' +
-    '<option value="">Select health status</option>' +
-    '<option value="healthy">Healthy</option>' +
-    '<option value="needs_attention">Needs Attention</option>' +
-    '<option value="diseased">Diseased</option>' +
-    '<option value="deceased">Deceased</option>' +
-    '</select>' +
-    '<span class="field-error" id="error-update-health"></span>' +
-    '</div>' +
-    '<div class="form-group">' +
-    '<label for="update-notes">Notes / Observations</label>' +
-    '<textarea id="update-notes" placeholder="Share any observations about your tree..." rows="3"></textarea>' +
-    '<span class="field-error" id="error-update-notes"></span>' +
-    '</div>' +
-    '<div class="form-group">' +
-    '<label for="update-photo">Current Tree Photo <span class="required">*</span></label>' +
-    '<input type="file" id="update-photo" accept="image/jpeg,image/png,image/webp" required>' +
-    '<p class="photo-hint">Required — share a current photo (JPG, PNG, or WebP, max 5MB)</p>' +
-    '<span class="field-error" id="error-update-photo"></span>' +
-    '</div>' +
-    '<div class="form-message" id="update-form-message"></div>' +
-    '<button type="submit" id="update-submit-btn">📝 Submit Update</button>' +
-    '</form>' +
-    '</div>';
+function renderUpdateForm(container, tree, updates) {
+  if (!updates) updates = [];
+  var updateStatus = getUpdateStatus(tree, updates);
+
+  var statusHtml = "";
+  if (updateStatus.status === "not_due") {
+    statusHtml =
+      '<div class="update-status not-due">' +
+      '<div class="update-status-icon">🌱</div>' +
+      '<h4>Update not needed yet</h4>' +
+      '<p>Your tree is newly planted. Your next update will be requested on/after ' +
+      formatDate(updateStatus.nextDueDate) + '.</p>' +
+      '</div>';
+  } else if (updateStatus.status === "recently_updated") {
+    statusHtml =
+      '<div class="update-status recently-updated">' +
+      '<div class="update-status-icon">✅</div>' +
+      '<h4>Tree update recorded</h4>' +
+      '<p>Your next update will be due on ' +
+      formatDate(updateStatus.nextDueDate) + '.</p>' +
+      '</div>';
+  } else if (updateStatus.status === "due") {
+    statusHtml =
+      '<div class="update-status due">' +
+      '<div class="update-status-icon">🌿</div>' +
+      '<h4>Your tree is ready for an update</h4>' +
+      '<p>Please tell us how your tree is doing and upload a recent photo.</p>' +
+      '</div>';
+  }
+
+  var formHtml = "";
+  if (updateStatus.status === "due") {
+    formHtml =
+      '<div class="update-form-container">' +
+      '<h3>📝 Update Your Tree</h3>' +
+      '<p class="update-form-intro">Help GreenRoots track your tree\'s growth. Submit a new update below.</p>' +
+      '<form class="tree-update-form" id="tree-update-form" novalidate>' +
+      '<div class="form-group">' +
+      '<label for="update-growth-stage">Current Growth Stage <span class="required">*</span></label>' +
+      '<select id="update-growth-stage" required>' +
+      '<option value="">Select growth stage</option>' +
+      '<option value="seedling">🌱 Seedling</option>' +
+      '<option value="sapling">🌿 Sapling</option>' +
+      '<option value="young">🌳 Young</option>' +
+      '<option value="mature">🌲 Mature</option>' +
+      '</select>' +
+      '<span class="field-error" id="error-update-stage"></span>' +
+      '</div>' +
+      '<div class="form-group">' +
+      '<label for="update-height">Current Height (cm)</label>' +
+      '<input type="number" id="update-height" placeholder="e.g. 120" min="0" max="100000">' +
+      '<span class="field-error" id="error-update-height"></span>' +
+      '</div>' +
+      '<div class="form-group">' +
+      '<label for="update-health">Health Status <span class="required">*</span></label>' +
+      '<select id="update-health" required>' +
+      '<option value="">Select health status</option>' +
+      '<option value="healthy">Healthy</option>' +
+      '<option value="needs_attention">Needs Attention</option>' +
+      '<option value="diseased">Diseased</option>' +
+      '<option value="deceased">Deceased</option>' +
+      '</select>' +
+      '<span class="field-error" id="error-update-health"></span>' +
+      '</div>' +
+      '<div class="form-group">' +
+      '<label for="update-notes">Notes / Observations</label>' +
+      '<textarea id="update-notes" placeholder="Share any observations about your tree..." rows="3"></textarea>' +
+      '<span class="field-error" id="error-update-notes"></span>' +
+      '</div>' +
+      '<div class="form-group">' +
+      '<label for="update-photo">Current Tree Photo <span class="required">*</span></label>' +
+      '<input type="file" id="update-photo" accept="image/jpeg,image/png,image/webp" required>' +
+      '<p class="photo-hint">Required — share a current photo (JPG, PNG, or WebP, max 5MB)</p>' +
+      '<span class="field-error" id="error-update-photo"></span>' +
+      '</div>' +
+      '<div class="form-message" id="update-form-message"></div>' +
+      '<button type="submit" id="update-submit-btn">📝 Submit Update</button>' +
+      '</form>' +
+      '</div>';
+  }
+
+  container.innerHTML = statusHtml + formHtml;
+
+  if (updateStatus.status !== "due") return;
 
   var updateForm = document.getElementById("tree-update-form");
   if (!updateForm) return;
@@ -905,11 +1043,17 @@ function renderUpdateForm(container, tree) {
     btn.disabled = true;
     btn.textContent = "Submitting...";
     msgEl.className = "form-message loading";
-    msgEl.textContent = "Saving your update...";
+    msgEl.textContent = "Uploading photo & saving your update...";
 
     try {
       var supabase = await getSupabaseClient();
 
+      var photoFile = photoInput.files[0];
+      msgEl.textContent = "Uploading your update photo...";
+      var photoUrl = await uploadTreePhoto(photoFile, "updates");
+      if (!photoUrl) throw new Error("Photo upload failed — no URL returned.");
+
+      msgEl.textContent = "Saving your update...";
       var updateData = {
         tree_id: tree.id,
         update_date: todayStr(),
@@ -917,15 +1061,20 @@ function renderUpdateForm(container, tree) {
         health_status: healthSelect.value,
         growth_stage: stageSelect.value,
         notes: notesInput.value.trim() || null,
-        photo_url: null,
+        photo_url: photoUrl,
       };
 
       var { error: insertError } = await supabase.from("tree_updates").insert(updateData);
 
       if (insertError) throw insertError;
 
+      var nextDueDate = new Date(parseDateLocal(todayStr()).getTime() + UPDATE_INTERVALS.SUBSEQUENT_UPDATE_DAYS * 24 * 60 * 60 * 1000);
+      var nextDueStr = nextDueDate.getFullYear() + "-" +
+        String(nextDueDate.getMonth() + 1).padStart(2, "0") + "-" +
+        String(nextDueDate.getDate()).padStart(2, "0");
+
       msgEl.className = "form-message success";
-      msgEl.textContent = "✅ Your tree update has been saved! Thank you for tracking your tree's growth.";
+      msgEl.textContent = "🌱 Tree update successfully recorded! Your next update will be due on " + formatDate(nextDueStr) + ".";
       updateForm.reset();
       btn.textContent = "📝 Submit Update";
       btn.disabled = false;
@@ -938,7 +1087,7 @@ function renderUpdateForm(container, tree) {
             showTreeDetail(result.tree, result.updates, null);
           }
         });
-      }, 1500);
+      }, 2500);
 
       setTimeout(function () {
         msgEl.className = "form-message";
