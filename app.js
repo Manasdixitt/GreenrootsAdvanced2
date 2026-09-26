@@ -1,7 +1,7 @@
 /* ==============================
    GreenRoots App — Shared Logic
    Navigation, counters, forms,
-   track page, community page
+   track page (UID-based), community page
 ============================== */
 
 document.addEventListener("DOMContentLoaded", async function () {
@@ -10,7 +10,7 @@ document.addEventListener("DOMContentLoaded", async function () {
   await initCounters();
   initRegisterForm();
   initContactForm();
-  await initTrackPage();
+  initTrackPage();
   await initCommunityPage();
 });
 
@@ -68,6 +68,60 @@ function initSmoothScroll() {
       }
     });
   });
+}
+
+/* ==============================
+   DATE HELPERS (date-only, no timezone shift)
+============================= */
+
+/* Parse a "YYYY-MM-DD" string as a local date (noon) to avoid
+   timezone shifts that change the calendar day. */
+function parseDateLocal(dateStr) {
+  if (!dateStr) return null;
+  var parts = dateStr.split("-");
+  if (parts.length !== 3) return null;
+  var year = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10);
+  var day = parseInt(parts[2], 10);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+/* Calculate days between two dates (date-only, no time component). */
+function daysBetween(fromDateStr, toDate) {
+  var from = parseDateLocal(fromDateStr);
+  if (!from) return null;
+  var to;
+  if (typeof toDate === "string") {
+    to = parseDateLocal(toDate);
+  } else {
+    to = new Date(toDate);
+    to.setHours(12, 0, 0, 0);
+  }
+  if (!to) return null;
+  var diff = to.getTime() - from.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+/* Format a date string for display (date-only, no timezone shift). */
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  var d = parseDateLocal(dateStr);
+  if (!d) return "";
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/* Get today's date as YYYY-MM-DD (local, not UTC). */
+function todayStr() {
+  var d = new Date();
+  var y = d.getFullYear();
+  var m = String(d.getMonth() + 1).padStart(2, "0");
+  var day = String(d.getDate()).padStart(2, "0");
+  return y + "-" + m + "-" + day;
 }
 
 /* ==============================
@@ -172,6 +226,19 @@ function animateCounter(el) {
 }
 
 /* ==============================
+   TREE UID GENERATION
+============================= */
+
+function generateTreeUID() {
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  var random = "";
+  for (var i = 0; i < 6; i++) {
+    random += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return "GR-KAN-" + random;
+}
+
+/* ==============================
    REGISTER FORM
 ============================== */
 
@@ -180,6 +247,7 @@ function initRegisterForm() {
   if (!form) return;
 
   const nameInput = document.getElementById("planter-name");
+  const emailInput = document.getElementById("planter-email");
   const typeInput = document.getElementById("tree-type");
   const dateInput = document.getElementById("planting-date");
   const locationMethod = document.querySelector(".location-method");
@@ -212,6 +280,17 @@ function initRegisterForm() {
       valid = false;
     }
 
+    var email = emailInput ? emailInput.value.trim() : "";
+    if (!email) {
+      showError("error-planter-email", "Please enter your email address.");
+      if (emailInput) emailInput.classList.add("invalid");
+      valid = false;
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showError("error-planter-email", "Please enter a valid email address.");
+      emailInput.classList.add("invalid");
+      valid = false;
+    }
+
     if (!typeInput.value.trim()) {
       showError("error-tree-type", "Please enter the tree type.");
       typeInput.classList.add("invalid");
@@ -227,10 +306,14 @@ function initRegisterForm() {
       dateInput.classList.add("invalid");
       valid = false;
     } else {
-      var selectedDate = new Date(dateInput.value);
+      var selectedDate = parseDateLocal(dateInput.value);
       var today = new Date();
       today.setHours(23, 59, 59, 999);
-      if (selectedDate > today) {
+      if (!selectedDate) {
+        showError("error-planting-date", "Please enter a valid date.");
+        dateInput.classList.add("invalid");
+        valid = false;
+      } else if (selectedDate > today) {
         showError("error-planting-date", "Planting date cannot be in the future.");
         dateInput.classList.add("invalid");
         valid = false;
@@ -247,7 +330,10 @@ function initRegisterForm() {
       valid = false;
     }
 
-    if (photoInput.files && photoInput.files[0]) {
+    if (!photoInput.files || !photoInput.files[0]) {
+      showError("error-tree-photo", "Please upload a photo of your tree.");
+      valid = false;
+    } else {
       var file = photoInput.files[0];
       var validTypes = ["image/jpeg", "image/png", "image/webp"];
       if (validTypes.indexOf(file.type) === -1) {
@@ -270,22 +356,25 @@ function initRegisterForm() {
     try {
       var supabase = await getSupabaseClient();
 
+      var treeUID = generateTreeUID();
+
       var insertData = {
         planter_name: nameInput.value.trim(),
+        planter_email: email,
         tree_type: typeInput.value.trim(),
         planting_date: dateInput.value,
         latitude: lat,
         longitude: lng,
         location_name: locationNameHidden.value || "",
         photo_url: null,
+        tree_uid: treeUID,
       };
 
-      var result = await supabase.from("trees").insert(insertData).select("id").single();
+      var result = await supabase.from("trees").insert(insertData).select("id,tree_uid").single();
 
       if (result.error) throw result.error;
 
-      var treeId = result.data.id;
-      var shortRef = treeId.substring(0, 8).toUpperCase();
+      var confirmedUID = result.data.tree_uid || treeUID;
 
       formMessage.className = "form-message";
       formMessage.textContent = "";
@@ -294,11 +383,11 @@ function initRegisterForm() {
       confirmation.className = "success-confirmation";
       confirmation.innerHTML =
         '<div class="success-icon">🌳</div>' +
-        '<h3>Your tree has been registered!</h3>' +
-        '<p>Give it a name, watch it grow, and share its journey with the community.</p>' +
-        '<div class="tree-ref">Tree ID: ' + shortRef + '</div>' +
+        '<h3>Tree Successfully Registered!</h3>' +
+        '<p>Save your Tree UID — you will need it to track and update your tree.</p>' +
+        '<div class="tree-ref">Your Tree UID: ' + escapeHtml(confirmedUID) + '</div>' +
         '<div class="success-actions">' +
-        '<button type="button" onclick="window.location.href=\'track.html\'">🌿 Track Growth</button>' +
+        '<button type="button" onclick="window.location.href=\'track.html\'">🌿 Track My Tree</button>' +
         '<button type="button" class="btn-secondary" onclick="resetRegisterForm()">🌱 Register Another</button>' +
         '</div>';
 
@@ -341,13 +430,16 @@ function initRegisterForm() {
     });
   }
 
-  nameInput.addEventListener("input", function () {
+  if (nameInput) nameInput.addEventListener("input", function () {
     if (nameInput.value.trim()) nameInput.classList.remove("invalid");
   });
-  typeInput.addEventListener("input", function () {
+  if (emailInput) emailInput.addEventListener("input", function () {
+    if (emailInput.value.trim()) emailInput.classList.remove("invalid");
+  });
+  if (typeInput) typeInput.addEventListener("input", function () {
     if (typeInput.value.trim()) typeInput.classList.remove("invalid");
   });
-  dateInput.addEventListener("change", function () {
+  if (dateInput) dateInput.addEventListener("change", function () {
     if (dateInput.value) dateInput.classList.remove("invalid");
   });
 }
@@ -469,277 +561,399 @@ function initContactForm() {
 }
 
 /* ==============================
-   TRACK PAGE
+   TRACK PAGE (UID-based)
 ============================== */
 
-async function initTrackPage() {
-  var treeList = document.getElementById("tree-list");
-  if (!treeList) return;
+function initTrackPage() {
+  var uidInput = document.getElementById("track-uid-input");
+  var uidBtn = document.getElementById("track-uid-btn");
+  var uidMessage = document.getElementById("track-uid-message");
+  var trackResult = document.getElementById("track-result");
 
-  var allTrees = [];
+  if (!uidInput || !uidBtn) return;
+
   var trackMap = null;
 
-  // Show skeleton loading
-  treeList.innerHTML = "";
-  for (var i = 0; i < 3; i++) {
-    var skel = document.createElement("div");
-    skel.className = "skeleton-card";
-    skel.innerHTML =
-      '<div class="skeleton-line medium"></div>' +
-      '<div class="skeleton-line long"></div>' +
-      '<div class="skeleton-line short"></div>';
-    treeList.appendChild(skel);
-  }
+  uidBtn.addEventListener("click", function () {
+    handleTrackUID();
+  });
 
-  try {
-    var supabase = await getSupabaseClient();
-    var { data, error } = await supabase
-      .from("trees")
-      .select("*")
-      .order("created_at", { ascending: false });
+  uidInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleTrackUID();
+    }
+  });
 
-    if (error) throw error;
-    allTrees = data || [];
-  } catch (err) {
-    console.error("Failed to load trees:", err);
-    treeList.innerHTML =
-      '<div class="error-state">' +
-      '<div class="error-state-icon">⚠️</div>' +
-      '<h4>Unable to load trees</h4>' +
-      '<p>Something went wrong while fetching tree data.</p>' +
-      '<button type="button" onclick="location.reload()">Try Again</button>' +
-      '</div>';
-    return;
-  }
+  function handleTrackUID() {
+    var uid = uidInput.value.trim().toUpperCase();
+    uidMessage.className = "track-uid-message";
+    uidMessage.textContent = "";
 
-  if (allTrees.length === 0) {
-    treeList.innerHTML =
-      '<div class="empty-state">' +
-      '<div class="empty-state-icon">🌱</div>' +
-      '<h4>No trees registered yet</h4>' +
-      '<p>Be the first to register a tree and start tracking its growth.</p>' +
-      '<a href="register.html">Register a tree →</a>' +
-      '</div>';
-    return;
-  }
-
-  renderTreeList(allTrees);
-
-  var searchInput = document.getElementById("track-search");
-  var filterSelect = document.getElementById("track-filter");
-
-  if (searchInput) {
-    searchInput.addEventListener("input", function () {
-      applyFilters();
-    });
-  }
-  if (filterSelect) {
-    filterSelect.addEventListener("change", function () {
-      applyFilters();
-    });
-  }
-
-  function applyFilters() {
-    var query = (searchInput ? searchInput.value : "").toLowerCase().trim();
-    var stage = filterSelect ? filterSelect.value : "";
-
-    var filtered = allTrees.filter(function (t) {
-      var matchesQuery =
-        !query ||
-        t.tree_type.toLowerCase().includes(query) ||
-        t.planter_name.toLowerCase().includes(query) ||
-        (t.location_name || "").toLowerCase().includes(query);
-      var matchesStage = !stage || t.growth_stage === stage;
-      return matchesQuery && matchesStage;
-    });
-
-    renderTreeList(filtered);
-  }
-
-  function renderTreeList(trees) {
-    treeList.innerHTML = "";
-    if (trees.length === 0) {
-      treeList.innerHTML =
-        '<div class="empty-state">' +
-        '<div class="empty-state-icon">🔍</div>' +
-        '<h4>No trees match your search</h4>' +
-        '<p>Try adjusting your search or filter criteria.</p>' +
-        '</div>';
+    if (!uid) {
+      uidMessage.className = "track-uid-message error";
+      uidMessage.textContent = "Please enter your Tree UID.";
       return;
     }
-    trees.forEach(function (tree) {
-      var card = document.createElement("div");
-      card.className = "tree-card";
-      card.setAttribute("role", "button");
-      card.setAttribute("tabindex", "0");
-      card.dataset.treeId = tree.id;
 
-      var stageIcon = {
-        seedling: "🌱",
-        sapling: "🌿",
-        young: "🌳",
-        mature: "🌲",
-      }[tree.growth_stage] || "🌱";
+    uidBtn.disabled = true;
+    uidBtn.textContent = "Searching...";
+    uidMessage.className = "track-uid-message loading";
+    uidMessage.textContent = "Looking up your tree...";
+    trackResult.style.display = "none";
 
-      card.innerHTML =
-        '<div class="tree-card-header">' +
-        '<span class="tree-card-title">' + stageIcon + " " + escapeHtml(tree.tree_type) + "</span>" +
-        '<span class="growth-badge ' + tree.growth_stage + '">' + tree.growth_stage + "</span>" +
-        "</div>" +
-        '<div class="tree-card-meta">' +
-        "Planted by " + escapeHtml(tree.planter_name) + " · " +
-        formatDate(tree.planting_date) +
-        "</div>" +
-        (tree.location_name
-          ? '<div class="tree-card-meta">📍 ' + escapeHtml(tree.location_name) + "</div>"
-          : "");
+    lookupTreeByUID(uid, trackMap).then(function (result) {
+      uidBtn.disabled = false;
+      uidBtn.textContent = "Track My Tree";
 
-      card.addEventListener("click", function () {
-        document.querySelectorAll(".tree-card").forEach(function (c) {
-          c.classList.remove("active");
-        });
-        card.classList.add("active");
-        showTreeDetail(tree);
-      });
+      if (result.error) {
+        uidMessage.className = "track-uid-message error";
+        uidMessage.textContent = result.error;
+        trackResult.style.display = "none";
+        return;
+      }
 
-      card.addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          card.click();
-        }
-      });
-
-      treeList.appendChild(card);
+      uidMessage.className = "track-uid-message";
+      uidMessage.textContent = "";
+      trackResult.style.display = "block";
+      showTreeDetail(result.tree, result.updates, trackMap);
     });
   }
+}
 
-  async function showTreeDetail(tree) {
-    var detailEl = document.getElementById("tree-detail");
-    if (!detailEl) return;
+async function lookupTreeByUID(uid, trackMap) {
+  try {
+    var supabase = await getSupabaseClient();
+    var { data: tree, error: treeError } = await supabase
+      .from("trees")
+      .select("*")
+      .eq("tree_uid", uid)
+      .maybeSingle();
 
-    detailEl.innerHTML =
-      '<div class="track-loading">Loading details...</div>';
+    if (treeError) throw treeError;
 
-    var updates = [];
+    if (!tree) {
+      return { error: "Tree UID not found. Please check your UID and try again." };
+    }
+
+    var { data: updates, error: updatesError } = await supabase
+      .from("tree_updates")
+      .select("*")
+      .eq("tree_id", tree.id)
+      .order("update_date", { ascending: false });
+
+    if (updatesError) throw updatesError;
+
+    return { tree: tree, updates: updates || [] };
+  } catch (err) {
+    console.error("Track lookup error:", err);
+    return { error: "Unable to look up your tree right now. Please try again." };
+  }
+}
+
+function showTreeDetail(tree, updates, trackMap) {
+  var detailEl = document.getElementById("tree-detail");
+  var updateSection = document.getElementById("update-section");
+  if (!detailEl) return;
+
+  var daysPlanted = daysBetween(tree.planting_date, new Date());
+  if (daysPlanted === null || daysPlanted < 0) daysPlanted = 0;
+
+  var stageIcon = {
+    seedling: "🌱",
+    sapling: "🌿",
+    young: "🌳",
+    mature: "🌲",
+  }[tree.growth_stage] || "🌱";
+
+  // Build growth timeline
+  var timelineEntries = [];
+
+  timelineEntries.push({
+    type: "planting",
+    date: tree.planting_date,
+    label: "Tree Planted",
+    stats: "Planted by " + escapeHtml(tree.planter_name),
+    notes: null,
+  });
+
+  var chronoUpdates = updates.slice().reverse();
+  chronoUpdates.forEach(function (u) {
+    var stats = [];
+    if (u.height_cm) stats.push(u.height_cm + " cm");
+    stats.push("Health: " + escapeHtml(u.health_status));
+    if (u.growth_stage) stats.push("Stage: " + escapeHtml(u.growth_stage));
+    timelineEntries.push({
+      type: "update",
+      date: u.update_date,
+      label: "Growth Update",
+      stats: stats.join(" · "),
+      notes: u.notes,
+    });
+  });
+
+  var timelineHtml = '<div class="growth-timeline">';
+  timelineEntries.forEach(function (entry) {
+    timelineHtml +=
+      '<div class="timeline-entry ' + entry.type + '">' +
+      '<div class="timeline-date">' + formatDate(entry.date) + '</div>' +
+      '<div class="timeline-label">' + escapeHtml(entry.label) + '</div>' +
+      '<div class="timeline-stats">' + entry.stats + '</div>' +
+      (entry.notes ? '<p>' + escapeHtml(entry.notes) + '</p>' : '') +
+      '</div>';
+  });
+  timelineHtml += '</div>';
+
+  var daysLabel;
+  if (daysPlanted === 0) {
+    daysLabel = "Planted today";
+  } else {
+    daysLabel = daysPlanted + " day" + (daysPlanted !== 1 ? "s" : "") + " since planting";
+  }
+
+  detailEl.innerHTML =
+    '<div class="detail-header">' +
+    "<h3>" + stageIcon + " " + escapeHtml(tree.tree_type) + "</h3>" +
+    "<p>Planted by " + escapeHtml(tree.planter_name) + "</p>" +
+    '<div class="tree-uid-display">Tree UID: <strong>' + escapeHtml(tree.tree_uid) + '</strong></div>' +
+    "</div>" +
+    '<div class="detail-grid">' +
+    '<div class="detail-item"><label>Planting Date</label><span class="value">' + formatDate(tree.planting_date) + "</span></div>" +
+    '<div class="detail-item"><label>Time Since Planting</label><span class="value">' + daysLabel + "</span></div>" +
+    '<div class="detail-item"><label>Growth Stage</label><span class="value">' + escapeHtml(tree.growth_stage) + "</span></div>" +
+    '<div class="detail-item"><label>Status</label><span class="value">' + escapeHtml(tree.status) + "</span></div>" +
+    '<div class="detail-item"><label>Location</label><span class="value">' + escapeHtml(tree.location_name || "Not specified") + "</span></div>" +
+    '<div class="detail-item"><label>Coordinates</label><span class="value">' + tree.latitude.toFixed(4) + ", " + tree.longitude.toFixed(4) + "</span></div>" +
+    "</div>" +
+    '<div class="detail-updates">' +
+    "<h4>🌿 Growth Timeline</h4>" +
+    timelineHtml +
+    "</div>" +
+    '<div id="track-map"></div>';
+
+  if (typeof L !== "undefined") {
+    initTrackMap(tree, trackMap);
+  }
+
+  // Show update form
+  if (updateSection) {
+    renderUpdateForm(updateSection, tree);
+  }
+
+  detailEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function initTrackMap(tree, trackMap) {
+  if (trackMap) {
+    trackMap.remove();
+    trackMap = null;
+  }
+  var mapEl = document.getElementById("track-map");
+  if (!mapEl) return;
+
+  trackMap = L.map("track-map").setView([tree.latitude, tree.longitude], 14);
+  var tileUrl =
+    "https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=6b4b353b3eb74bd191c7ae4751a7a86a";
+  L.tileLayer(tileUrl, {
+    maxZoom: 20,
+    attribution:
+      'Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
+  }).addTo(trackMap);
+
+  L.marker([tree.latitude, tree.longitude])
+    .addTo(trackMap)
+    .bindPopup(
+      "<strong>" + escapeHtml(tree.tree_type) + "</strong><br>" +
+      escapeHtml(tree.planter_name) + "<br>" +
+      escapeHtml(tree.location_name || "")
+    )
+    .openPopup();
+
+  setTimeout(function () {
+    trackMap.invalidateSize();
+  }, 100);
+}
+
+/* ==============================
+   TREE UPDATE FORM
+============================== */
+
+function renderUpdateForm(container, tree) {
+  container.innerHTML =
+    '<div class="update-form-container">' +
+    '<h3>📝 Update Your Tree</h3>' +
+    '<p class="update-form-intro">Help GreenRoots track your tree\'s growth. Submit a new update below.</p>' +
+    '<form class="tree-update-form" id="tree-update-form" novalidate>' +
+    '<div class="form-group">' +
+    '<label for="update-growth-stage">Current Growth Stage <span class="required">*</span></label>' +
+    '<select id="update-growth-stage" required>' +
+    '<option value="">Select growth stage</option>' +
+    '<option value="seedling">🌱 Seedling</option>' +
+    '<option value="sapling">🌿 Sapling</option>' +
+    '<option value="young">🌳 Young</option>' +
+    '<option value="mature">🌲 Mature</option>' +
+    '</select>' +
+    '<span class="field-error" id="error-update-stage"></span>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label for="update-height">Current Height (cm)</label>' +
+    '<input type="number" id="update-height" placeholder="e.g. 120" min="0" max="100000">' +
+    '<span class="field-error" id="error-update-height"></span>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label for="update-health">Health Status <span class="required">*</span></label>' +
+    '<select id="update-health" required>' +
+    '<option value="">Select health status</option>' +
+    '<option value="healthy">Healthy</option>' +
+    '<option value="needs_attention">Needs Attention</option>' +
+    '<option value="diseased">Diseased</option>' +
+    '<option value="deceased">Deceased</option>' +
+    '</select>' +
+    '<span class="field-error" id="error-update-health"></span>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label for="update-notes">Notes / Observations</label>' +
+    '<textarea id="update-notes" placeholder="Share any observations about your tree..." rows="3"></textarea>' +
+    '<span class="field-error" id="error-update-notes"></span>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label for="update-photo">Current Tree Photo <span class="required">*</span></label>' +
+    '<input type="file" id="update-photo" accept="image/jpeg,image/png,image/webp" required>' +
+    '<p class="photo-hint">Required — share a current photo (JPG, PNG, or WebP, max 5MB)</p>' +
+    '<span class="field-error" id="error-update-photo"></span>' +
+    '</div>' +
+    '<div class="form-message" id="update-form-message"></div>' +
+    '<button type="submit" id="update-submit-btn">📝 Submit Update</button>' +
+    '</form>' +
+    '</div>';
+
+  var updateForm = document.getElementById("tree-update-form");
+  if (!updateForm) return;
+
+  var isUpdating = false;
+
+  updateForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    if (isUpdating) return;
+
+    var msgEl = document.getElementById("update-form-message");
+    var btn = document.getElementById("update-submit-btn");
+    var stageSelect = document.getElementById("update-growth-stage");
+    var healthSelect = document.getElementById("update-health");
+    var heightInput = document.getElementById("update-height");
+    var notesInput = document.getElementById("update-notes");
+    var photoInput = document.getElementById("update-photo");
+
+    // Clear errors
+    document.querySelectorAll("#tree-update-form .field-error").forEach(function (el) {
+      el.textContent = "";
+    });
+    document.querySelectorAll("#tree-update-form .invalid").forEach(function (el) {
+      el.classList.remove("invalid");
+    });
+    msgEl.className = "form-message";
+    msgEl.textContent = "";
+
+    var valid = true;
+
+    if (!stageSelect.value) {
+      var el = document.getElementById("error-update-stage");
+      if (el) el.textContent = "Please select a growth stage.";
+      stageSelect.classList.add("invalid");
+      valid = false;
+    }
+
+    if (!healthSelect.value) {
+      var el = document.getElementById("error-update-health");
+      if (el) el.textContent = "Please select a health status.";
+      healthSelect.classList.add("invalid");
+      valid = false;
+    }
+
+    var heightVal = heightInput.value.trim();
+    if (heightVal) {
+      var h = parseInt(heightVal, 10);
+      if (isNaN(h) || h < 0) {
+        var el = document.getElementById("error-update-height");
+        if (el) el.textContent = "Height must be a positive number.";
+        heightInput.classList.add("invalid");
+        valid = false;
+      }
+    }
+
+    if (!photoInput.files || !photoInput.files[0]) {
+      var el = document.getElementById("error-update-photo");
+      if (el) el.textContent = "Please upload a current photo of your tree.";
+      valid = false;
+    } else {
+      var file = photoInput.files[0];
+      var validTypes = ["image/jpeg", "image/png", "image/webp"];
+      if (validTypes.indexOf(file.type) === -1) {
+        var el = document.getElementById("error-update-photo");
+        if (el) el.textContent = "Please upload a JPG, PNG, or WebP image.";
+        valid = false;
+      } else if (file.size > 5 * 1024 * 1024) {
+        var el = document.getElementById("error-update-photo");
+        if (el) el.textContent = "Image must be 5MB or smaller.";
+        valid = false;
+      }
+    }
+
+    if (!valid) return;
+
+    isUpdating = true;
+    btn.disabled = true;
+    btn.textContent = "Submitting...";
+    msgEl.className = "form-message loading";
+    msgEl.textContent = "Saving your update...";
+
     try {
       var supabase = await getSupabaseClient();
-      var { data, error } = await supabase
-        .from("tree_updates")
-        .select("*")
-        .eq("tree_id", tree.id)
-        .order("update_date", { ascending: false });
-      if (!error) updates = data || [];
+
+      var updateData = {
+        tree_id: tree.id,
+        update_date: todayStr(),
+        height_cm: heightVal ? parseInt(heightVal, 10) : null,
+        health_status: healthSelect.value,
+        growth_stage: stageSelect.value,
+        notes: notesInput.value.trim() || null,
+        photo_url: null,
+      };
+
+      var { error: insertError } = await supabase.from("tree_updates").insert(updateData);
+
+      if (insertError) throw insertError;
+
+      msgEl.className = "form-message success";
+      msgEl.textContent = "✅ Your tree update has been saved! Thank you for tracking your tree's growth.";
+      updateForm.reset();
+      btn.textContent = "📝 Submit Update";
+      btn.disabled = false;
+      isUpdating = false;
+
+      // Reload the tree detail to show the new update in the timeline
+      setTimeout(function () {
+        lookupTreeByUID(tree.tree_uid, null).then(function (result) {
+          if (!result.error) {
+            showTreeDetail(result.tree, result.updates, null);
+          }
+        });
+      }, 1500);
+
+      setTimeout(function () {
+        msgEl.className = "form-message";
+        msgEl.textContent = "";
+      }, 6000);
     } catch (err) {
-      console.error("Failed to load updates:", err);
+      console.error("Update submission error:", err);
+      msgEl.className = "form-message error";
+      msgEl.textContent =
+        "Unable to save your update right now. Please try again later.";
+      btn.textContent = "📝 Submit Update";
+      btn.disabled = false;
+      isUpdating = false;
     }
-
-    var daysPlanted = Math.floor(
-      (Date.now() - new Date(tree.planting_date).getTime()) / (1000 * 60 * 60 * 24)
-    );
-    var stageIcon = {
-      seedling: "🌱",
-      sapling: "🌿",
-      young: "🌳",
-      mature: "🌲",
-    }[tree.growth_stage] || "🌱";
-
-    // Build growth timeline (planting + updates in chronological order)
-    var timelineEntries = [];
-
-    timelineEntries.push({
-      type: "planting",
-      date: tree.planting_date,
-      label: "Tree Planted",
-      stats: "Planted by " + escapeHtml(tree.planter_name),
-      notes: null,
-    });
-
-    // Updates are fetched newest-first; add them in reverse for chronological display
-    var chronoUpdates = updates.slice().reverse();
-    chronoUpdates.forEach(function (u) {
-      var stats = [];
-      if (u.height_cm) stats.push(u.height_cm + " cm");
-      stats.push("Health: " + escapeHtml(u.health_status));
-      timelineEntries.push({
-        type: "update",
-        date: u.update_date,
-        label: "Growth Update",
-        stats: stats.join(" · "),
-        notes: u.notes,
-      });
-    });
-
-    var timelineHtml = "";
-    if (timelineEntries.length === 0) {
-      timelineHtml = '<p style="color:var(--text-light);font-size:15px;">No growth history yet.</p>';
-    } else {
-      timelineHtml = '<div class="growth-timeline">';
-      timelineEntries.forEach(function (entry) {
-        timelineHtml +=
-          '<div class="timeline-entry ' + entry.type + '">' +
-          '<div class="timeline-date">' + formatDate(entry.date) + '</div>' +
-          '<div class="timeline-label">' + escapeHtml(entry.label) + '</div>' +
-          '<div class="timeline-stats">' + entry.stats + '</div>' +
-          (entry.notes ? '<p>' + escapeHtml(entry.notes) + '</p>' : '') +
-          '</div>';
-      });
-      timelineHtml += '</div>';
-    }
-
-    detailEl.innerHTML =
-      '<div class="detail-header">' +
-      "<h3>" + stageIcon + " " + escapeHtml(tree.tree_type) + "</h3>" +
-      "<p>Planted by " + escapeHtml(tree.planter_name) + "</p>" +
-      "</div>" +
-      '<div class="detail-grid">' +
-      '<div class="detail-item"><label>Planting Date</label><span class="value">' + formatDate(tree.planting_date) + "</span></div>" +
-      '<div class="detail-item"><label>Days Since Planted</label><span class="value">' + daysPlanted + " days</span></div>" +
-      '<div class="detail-item"><label>Growth Stage</label><span class="value">' + escapeHtml(tree.growth_stage) + "</span></div>" +
-      '<div class="detail-item"><label>Status</label><span class="value">' + escapeHtml(tree.status) + "</span></div>" +
-      '<div class="detail-item"><label>Location</label><span class="value">' + escapeHtml(tree.location_name || "Not specified") + "</span></div>" +
-      '<div class="detail-item"><label>Coordinates</label><span class="value">' + tree.latitude.toFixed(4) + ", " + tree.longitude.toFixed(4) + "</span></div>" +
-      "</div>" +
-      '<div class="detail-updates">' +
-      "<h4>🌿 Growth Timeline</h4>" +
-      timelineHtml +
-      "</div>" +
-      '<div id="track-map"></div>';
-
-    if (typeof L !== "undefined") {
-      initTrackMap(tree);
-    }
-  }
-
-  function initTrackMap(tree) {
-    if (trackMap) {
-      trackMap.remove();
-      trackMap = null;
-    }
-    var mapEl = document.getElementById("track-map");
-    if (!mapEl) return;
-
-    trackMap = L.map("track-map").setView([tree.latitude, tree.longitude], 14);
-    var tileUrl =
-      "https://maps.geoapify.com/v1/tile/osm-bright/{z}/{x}/{y}.png?apiKey=6b4b353b3eb74bd191c7ae4751a7a86a";
-    L.tileLayer(tileUrl, {
-      maxZoom: 20,
-      attribution:
-        'Powered by <a href="https://www.geoapify.com/" target="_blank">Geoapify</a> | <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap contributors</a>',
-    }).addTo(trackMap);
-
-    L.marker([tree.latitude, tree.longitude])
-      .addTo(trackMap)
-      .bindPopup(
-        "<strong>" + escapeHtml(tree.tree_type) + "</strong><br>" +
-        escapeHtml(tree.planter_name) + "<br>" +
-        escapeHtml(tree.location_name || "")
-      )
-      .openPopup();
-
-    setTimeout(function () {
-      trackMap.invalidateSize();
-    }, 100);
-  }
+  });
 }
 
 /* ==============================
@@ -960,16 +1174,6 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return "";
-  var d = new Date(dateStr);
-  return d.toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
 }
 
 function formatTimeAgo(timestamp) {

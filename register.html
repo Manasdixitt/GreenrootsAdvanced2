@@ -48,6 +48,12 @@
         </div>
 
         <div class="form-group">
+            <label for="planter-email">Email Address <span class="required">*</span></label>
+            <input type="email" id="planter-email" placeholder="you@example.com" required>
+            <span class="field-error" id="error-planter-email"></span>
+        </div>
+
+        <div class="form-group">
             <label for="tree-type">Tree Type <span class="required">*</span></label>
             <input type="text" id="tree-type" placeholder="e.g. Neem, Mango, Peepal" required>
             <span class="field-error" id="error-tree-type"></span>
@@ -77,9 +83,10 @@
         </div>
 
         <div class="form-group">
-            <label for="tree-photo">Tree Photo</label>
-            <input type="file" id="tree-photo" accept="image/jpeg,image/png,image/webp">
-            <p class="photo-hint">Optional — share a photo of your tree (JPG, PNG, or WebP, max 5MB)</p>
+            <label for="tree-photo">Tree Photo <span class="required">*</span></label>
+            <input type="file" id="tree-photo" accept="image/jpeg,image/png,image/webp" required>
+            <p class="photo-hint">Required — share a photo of your tree (JPG, PNG, or WebP, max 5MB)</p>
+            <span class="field-error" id="error-tree-photo"></span>
         </div>
 
         <div class="form-message" id="form-message"></div>

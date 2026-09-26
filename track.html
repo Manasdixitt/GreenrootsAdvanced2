@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Track Growth | GreenRoots</title>
-    <meta name="description" content="Track the growth of registered trees — see planting details, location, and growth updates.">
+    <meta name="description" content="Track the growth of your registered tree — enter your Tree UID to view details and submit updates.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -36,35 +36,25 @@
 <main class="track-page">
     <div class="page-header">
         <p class="mission-tag">TRACK GROWTH</p>
-        <h2>🌳 Watch Your Trees Flourish</h2>
-        <p>Monitor the progress of every registered tree — from seedling to shade-giving giant.</p>
+        <h2>🌳 Track Your Tree</h2>
+        <p>Enter your unique GreenRoots Tree UID to view your tree's details and submit a growth update.</p>
     </div>
 
-    <div class="track-controls">
-        <input type="text" id="track-search" placeholder="🔍 Search by tree type, planter, or location..." aria-label="Search trees">
-        <select id="track-filter" aria-label="Filter by growth stage">
-            <option value="">All Stages</option>
-            <option value="seedling">🌱 Seedling</option>
-            <option value="sapling">🌿 Sapling</option>
-            <option value="young">🌳 Young</option>
-            <option value="mature">🌲 Mature</option>
-        </select>
-    </div>
-
-    <div class="track-layout">
-        <div class="tree-list" id="tree-list">
-            <div class="track-loading">Loading trees...</div>
-        </div>
-        <div class="tree-detail" id="tree-detail">
-            <div class="track-placeholder">
-                <div class="track-placeholder-icon">🌳</div>
-                <p>Select a tree from the list to see its details and growth history.</p>
+    <div class="track-uid-entry">
+        <div class="track-uid-form">
+            <label for="track-uid-input" class="track-uid-label">Your Tree UID</label>
+            <div class="track-uid-input-row">
+                <input type="text" id="track-uid-input" placeholder="e.g. GR-KAN-8F42A1" autocomplete="off" aria-label="Enter your Tree UID">
+                <button type="button" id="track-uid-btn">Track My Tree</button>
             </div>
+            <div class="track-uid-message" id="track-uid-message"></div>
         </div>
+        <p class="track-uid-hint">Don't have a Tree UID? <a href="register.html">Register your tree first</a> to get one.</p>
     </div>
 
-    <div id="track-map-container" style="display:none;">
-        <div id="track-map" role="application" aria-label="Map showing tree locations"></div>
+    <div class="track-result" id="track-result" style="display:none;">
+        <div class="tree-detail" id="tree-detail"></div>
+        <div class="update-section" id="update-section"></div>
     </div>
 </main>
 
